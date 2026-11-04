@@ -1,0 +1,9 @@
+langchain
+langchain-core
+langchain-openai
+langgraph
+pyyaml
+azure-identity
+azure-monitor-query
+python-dotenv
+langchain-mcp-adapters

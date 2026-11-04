@@ -2,3 +2,5 @@ secrets.tfvars
 .terraform/
 *.tfstate
 *.tfstate.*
+.env
+*__pycache__/
