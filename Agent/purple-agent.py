@@ -28,6 +28,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from Tools.read_rule import read_rule
 from Tools.check_telemetry import check_telemetry_logic
 from Clients.mcp import load_mcp_tools
+from Clients.github import report_verdict
 
 load_dotenv()
 
@@ -115,6 +116,9 @@ async def main():
     print("\n=== VERDICT ===")
     for k, v in verdict.items():
         print(f"  {k}: {v}")
+
+    # 7. Route the verdict: a gap or blind spot becomes a DaC issue.
+    report_verdict(rule, guid, (s, e), verdict)
 
 
 if __name__ == "__main__":
