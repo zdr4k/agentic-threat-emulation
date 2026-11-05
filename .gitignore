@@ -3,4 +3,5 @@ secrets.tfvars
 *.tfstate
 *.tfstate.*
 .env
-*__pycache__/
+__pycache__
+Agent/data/
