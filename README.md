@@ -12,7 +12,6 @@
        LangChain · MCP · Sentinel
                  v0.1
 ```
-#ARGUS
 ## agentic-threat-emulation
 
 An agent that checks whether a detection rule actually catches the technique it
@@ -37,10 +36,22 @@ problems. Separating them is the point of the lab.
 
 ## How it works
 
+```mermaid
+flowchart TD
+    A["Read Detection Rule<br/>Detection-as-Code Repository"]
+    B["Select Atomic Test<br/>LLM + Atomic Red Team"]
+    C["Human Approval"]
+    D["Execute Test<br/>MCP · Lab VM"]
+    E["Verify Telemetry<br/>Microsoft Sentinel"]
+    F{"Detection Assessment"}
+
+    A --> B --> C --> D --> E --> F
+
+    F --> G["Detected"]
+    F --> H["Gap"]
+    F --> I["Blind"]
 ```
-read rule  ->  pick atomic  ->  execute (MCP)  ->  check telemetry  ->  verdict
- (DaC repo)      (LLM)          (on the VM)        (Sentinel)       detected/gap/blind
-```
+
 
 The model only picks the atomic. Everything that decides the verdict is
 deterministic code, so the verdict cannot be faked by the model deciding it is
