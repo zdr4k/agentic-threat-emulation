@@ -165,15 +165,6 @@ blind spot. Run history is written to `Agent/runs.jsonl` (gitignored).
 `workflow.run_validation(rule_file)` is the same flow without the menu, for
 scripting.
 
-### Cost
-
-The VM is the only thing that costs while running. Deallocate it between
-sessions:
-
-```bash
-az vm deallocate -g ai-purple-rg -n ai-purple-vm
-```
-
 ## Safety
 
 The atomics do real, sometimes destructive things. They run only on the
