@@ -126,20 +126,13 @@ def parse_atomic_response(result) -> list[dict]:
 
 
 async def query_atomics_node(state: AgentState) -> dict:
-    """Discover Atomic Tests through MCP."""
+    """Discover Atomic Tests through a persistent MCP session."""
+
+    from Clients.mcp import mcp_session
 
     technique = state["technique_id"]
     rule = state["rule"]
 
-    tools = {
-        tool.name: tool
-        for tool in await load_mcp_tools()
-    }
-
-    if "query_atomics" not in tools:
-        raise RuntimeError("query_atomics tool not available")
-
-    # Use the technique ID as the primary search term.
     queries = [
         technique,
         rule["display_name"]
@@ -148,25 +141,29 @@ async def query_atomics_node(state: AgentState) -> dict:
     candidates = []
     seen_guids = set()
 
-    for query in queries:
-        result = await tools["query_atomics"].ainvoke({
-            "query": query,
-            "technique_id": technique
-        })
+    async with mcp_session() as tools:
+        if "query_atomics" not in tools:
+            raise RuntimeError("query_atomics tool not available")
 
-        found = parse_atomic_response(result)
+        for query in queries:
+            result = await tools["query_atomics"].ainvoke({
+                "query": query,
+                "technique_id": technique
+            })
 
-        print(
-            f"[MCP] Query: {query} | "
-            f"Results: {len(found)}"
-        )
+            found = parse_atomic_response(result)
 
-        for atomic in found:
-            guid = atomic.get("auto_generated_guid")
+            print(
+                f"[MCP] Query: {query} | "
+                f"Results: {len(found)}"
+            )
 
-            if guid and guid not in seen_guids:
-                seen_guids.add(guid)
-                candidates.append(atomic)
+            for atomic in found:
+                guid = atomic.get("auto_generated_guid")
+
+                if guid and guid not in seen_guids:
+                    seen_guids.add(guid)
+                    candidates.append(atomic)
 
     print(f"\n[MCP] Technique: {technique}")
     print(f"[MCP] Unique candidates: {len(candidates)}")
@@ -175,8 +172,6 @@ async def query_atomics_node(state: AgentState) -> dict:
         "atomic_candidates": candidates,
         "status": "atomics_loaded"
     }
-
-
 
 
 # ---------------------------------------------------------
@@ -192,8 +187,9 @@ class AtomicSelection(BaseModel):
     )
 
 
+
 async def select_atomic_node(state: AgentState) -> dict:
-    """Recommend an Atomic Test using the LLM."""
+    """Select an Atomic Test only when behavior matches the rule."""
 
     rule = state["rule"]
     candidates = state["atomic_candidates"]
@@ -202,66 +198,107 @@ async def select_atomic_node(state: AgentState) -> dict:
         {
             "guid": atomic.get("auto_generated_guid"),
             "name": atomic.get("name"),
-            "description": atomic.get("description", "")[:300],
+            "description": atomic.get("description", ""),
+            "supported_platforms": atomic.get("supported_platforms", []),
         }
         for atomic in candidates
     ]
 
     llm = ChatOpenAI(
         model="gpt-4o-mini",
-        temperature=0
+        temperature=0,
     ).with_structured_output(AtomicSelection)
-
 
     selection = await llm.ainvoke([
         (
             "system",
-            "You are a detection validation assistant. "
-            "Analyze the detection rule and recommend the "
-            "Atomic Test whose metadata best matches the "
-            "specific behavior described by the rule. "
-            "Prioritize direct behavioral matches over "
-            "generic technique matches. "
-            "Use the KQL query to understand what telemetry "
-            "the detection expects. "
-            "Select only from the provided GUIDs. "
-            "Do not generate commands or execute tests."
+            """
+You are a detection engineering validation assistant.
+
+Your task is to determine whether an Atomic Test is
+suitable for validating a specific detection rule.
+
+Evaluate:
+1. The actual behavior detected by the KQL query.
+2. The behavior described in each Atomic Test.
+3. Whether the test would plausibly generate the
+   specific telemetry required by the rule.
+
+Rules:
+- MITRE technique similarity alone is insufficient.
+- Prefer direct behavioral correspondence.
+- Do not assume a test generates AzureActivity events
+  simply because it involves Azure or Entra ID.
+- If the metadata is insufficient, return guid=null.
+- If no test is suitable, return guid=null.
+- Never invent a GUID.
+- Do not generate commands or execute tests.
+"""
         ),
         (
             "human",
             json.dumps({
                 "rule_name": rule["display_name"],
                 "rule_query": rule["query"],
+                "rule_table": rule.get("table"),
                 "technique": state["technique_id"],
-                "candidates": summaries
+                "candidates": summaries,
             })
-        )
+        ),
     ])
 
+    if selection.guid is None:
+        print("\n[Selection] No suitable Atomic Test found.")
+        print(f"[Selection] Reason: {selection.reason}")
+
+        return {
+            "selected_atomic": {},
+            "selection_reason": selection.reason,
+            "status": "no_suitable_atomic",
+        }
 
 
+    # Normalize the LLM response.
+    guid = selection.guid
+
+    if isinstance(guid, str):
+        guid = guid.strip()
+
+        if guid.lower() in ("", "none", "null", "n/a"):
+            guid = None
+
+    # Verify the GUID against the actual MCP candidates.
     selected = next(
         (
             atomic for atomic in candidates
-            if atomic.get("auto_generated_guid") == selection.guid
+            if atomic.get("auto_generated_guid") == guid
         ),
-        None
+        None,
     )
 
     if selected is None:
-        raise ValueError(
-            "LLM selected an unknown Atomic Test GUID"
-        )
+        print("\n[Selection] No valid Atomic Test selected.")
+        print(f"[Selection] LLM returned: {guid!r}")
+        print(f"[Selection] Reason: {selection.reason}")
+
+        return {
+            "selected_atomic": {},
+            "selection_reason": (
+                selection.reason
+                if guid is None
+                else "LLM returned a GUID not present in MCP candidates."
+            ),
+            "status": "no_suitable_atomic",
+        }
 
     return {
         "selected_atomic": {
             "guid": selection.guid,
-            "name": selected["name"]
+            "name": selected["name"],
         },
         "selection_reason": selection.reason,
-        "status": "atomic_recommended"
+        "status": "atomic_recommended",
     }
-
 
 # ---------------------------------------------------------
 # 6. Display Recommendation

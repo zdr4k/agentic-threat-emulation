@@ -24,3 +24,7 @@ class AgentState(TypedDict, total=False):
     approval_status: str
     started_at: str
     finished_at: str
+    execution_evidence: dict
+    telemetry_correlation: dict
+    alert_evidence: dict
+    detection_assessment: dict
