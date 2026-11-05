@@ -1,4 +1,19 @@
-# agentic-threat-emulation
+ ```
+           .         *          .
+      *         .          *
+
+     ___   ___   ___ _   _ ___
+    / _ \ | _ \ / __| | | / __|
+   / /_\ \|   /| (_ | |_| \__ \
+  /_/   \_\_|_\ \___|\___/|___/
+
+       AGENTIC DETECTION VALIDATION
+
+       LangChain · MCP · Sentinel
+                 v0.1
+```
+#ARGUS
+## agentic-threat-emulation
 
 An agent that checks whether a detection rule actually catches the technique it
 claims to cover. It reads a rule, runs the matching atomic on an isolated lab
@@ -101,7 +116,22 @@ OPENAI_API_KEY=sk-...
 SENTINEL_WORKSPACE_ID=<workspace customer id>
 MCP_URL=https://<ngrok-id>.ngrok-free.app/mcp
 MCP_AUTH_TOKEN=<the token start-lab printed>
+# Optional: file a tracking issue on a gap or a blind spot.
+ISSUE_REPO=zdr4k/de-th-sentinel-dac
+ISSUE_TOKEN=<token with issues:write on ISSUE_REPO>
 ```
+
+Use `ISSUE_TOKEN`, not `GITHUB_TOKEN`: Codespaces injects its own limited
+`GITHUB_TOKEN` into the environment, and `load_dotenv` does not override an
+existing environment variable, so a PAT placed in `.env` under `GITHUB_TOKEN`
+is silently ignored. `ISSUE_TOKEN` avoids the collision (the client falls back
+to `GITHUB_TOKEN` only if `ISSUE_TOKEN` is unset).
+
+With `ISSUE_REPO` and `ISSUE_TOKEN` set, a gap or a blind verdict opens an
+issue in the detection-as-code repo (detected opens nothing). It is idempotent
+by title, so a re-run that reaches the same verdict reuses the open issue
+instead of filing a duplicate. Leave them unset and the agent only prints the
+verdict.
 
 `MCP_URL` and `MCP_AUTH_TOKEN` come from `start-lab.ps1`. The ngrok URL changes
 every time the tunnel restarts, so update `MCP_URL` each session.
@@ -111,11 +141,18 @@ every time the tunnel restarts, so update `MCP_URL` each session.
 ```bash
 az login
 cd Agent
-python run_loop.py
+python main.py
 ```
 
-The agent reads the rule, picks an atomic for its technique, executes it on the
-VM through the MCP, waits for telemetry, and prints the verdict.
+`main.py` is a small menu: validate a named rule, let the agent pick one, or
+view run history. Either way the agent reads the rule, searches atomics for the
+rule's own technique (nothing hardcoded), lets the model pick the matching one,
+asks you to approve that atomic (manual mode), executes it on the VM through the
+MCP, waits for telemetry, prints the verdict, and files an issue on a gap or a
+blind spot. Run history is written to `Agent/runs.jsonl` (gitignored).
+
+`workflow.run_validation(rule_file)` is the same flow without the menu, for
+scripting.
 
 ### Cost
 

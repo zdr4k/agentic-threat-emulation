@@ -5,3 +5,27 @@ secrets.tfvars
 .env
 __pycache__
 Agent/data/
+
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/reports/
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store

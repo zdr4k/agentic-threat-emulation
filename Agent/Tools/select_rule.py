@@ -1,96 +1,62 @@
+"""
+select_rule: list the detection rules in the DaC repo and let the model pick
+one to validate. Returns {"filename": ..., "reason": ...}.
 
+Env:
+  DAC_REPO        owner/name of the DaC repo (default zdr4k/de-th-sentinel-dac)
+  DAC_RULES_PATH  folder holding the rules (default Rules)
+  ISSUE_TOKEN / GITHUB_TOKEN  optional, raises the GitHub API rate limit
+"""
+
+from __future__ import annotations
+
+import json
 import os
-import requests
+import re
+import urllib.request
 
-from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+
+REPO = os.getenv("DAC_REPO", "zdr4k/de-th-sentinel-dac")
+RULES_PATH = os.getenv("DAC_RULES_PATH", "Rules")
 
 
-REPO = "zdr4k/DE-TH-Sentinel-DaC"
-BRANCH = "main"
-RULES_PATH = "Rules"
-
-
-class RuleSelection(BaseModel):
-    filename: str = Field(
-        description="Exact filename selected from the provided list"
-    )
-    reason: str = Field(
-        description="Brief reason for selecting this detection rule"
-    )
-
-
-def list_detection_rules() -> list[str]:
-    url = (
-        f"https://api.github.com/repos/{REPO}"
-        f"/git/trees/{BRANCH}?recursive=1"
-    )
-
-    headers = {
-        "Accept": "application/vnd.github+json"
-    }
-
-    token = os.getenv("GITHUB_TOKEN")
-
+def list_rule_files() -> list[str]:
+    """Rule YAML file names in the repo's Rules folder, via the GitHub API."""
+    url = f"https://api.github.com/repos/{REPO}/contents/{RULES_PATH}"
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    token = os.getenv("ISSUE_TOKEN") or os.getenv("GITHUB_TOKEN")
     if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=30,
-    )
-    response.raise_for_status()
-
-    data = response.json()
-
-    if data.get("truncated"):
-        raise RuntimeError(
-            "GitHub returned an incomplete repository tree."
-        )
-
-    rules = [
-        item["path"].removeprefix(f"{RULES_PATH}/")
-        for item in data.get("tree", [])
-        if item["type"] == "blob"
-        and item["path"].startswith(f"{RULES_PATH}/")
-        and item["path"].lower().endswith((".yml", ".yaml"))
-    ]
-
-    return sorted(rules)
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
+        items = json.loads(resp.read().decode("utf-8"))
+    return [it["name"] for it in items
+            if it.get("type") == "file" and it["name"].endswith((".yml", ".yaml"))]
 
 
 def select_detection_rule() -> dict:
-    rules = list_detection_rules()
+    """List the rules and let the model pick one, with a one-line reason."""
+    files = list_rule_files()
+    if not files:
+        raise RuntimeError(f"no rule files found in {REPO}/{RULES_PATH}")
 
-    if not rules:
-        raise RuntimeError("No detection rules found.")
-
-    print(f"\n[GitHub] Found {len(rules)} detection rules.")
-
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-    ).with_structured_output(RuleSelection)
-
-    result = llm.invoke(
-        "You are a detection engineering assistant.\n"
-        "Select ONE detection rule suitable for a simple, "
-        "read-only validation demonstration.\n"
-        "Prefer rules with clear MITRE ATT&CK mappings "
-        "and straightforward telemetry requirements.\n"
-        "You only have filenames, not rule contents. "
-        "Do not claim to have inspected the queries.\n"
-        "Return the exact filename from the list.\n\n"
-        f"Available rules:\n" + "\n".join(rules)
-    )
-
-    if result.filename not in rules:
-        raise ValueError(
-            "The LLM selected a rule outside the repository list."
-        )
-
-    return {
-        "filename": result.filename,
-        "reason": result.reason,
-    }
+    model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    msg = model.invoke([
+        SystemMessage(content=(
+            "You choose one detection rule to validate against live telemetry. "
+            'Reply as JSON only: {"filename": "<one of the files>", '
+            '"reason": "<one sentence>"}.'
+        )),
+        HumanMessage(content="Rules:\n" + "\n".join(files)),
+    ])
+    text = re.sub(r"^```(?:json)?|```$", "", msg.content.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(text)
+        filename = data.get("filename", "")
+        reason = data.get("reason", "")
+    except json.JSONDecodeError:
+        filename, reason = "", "model did not return valid JSON"
+    if filename not in files:
+        filename, reason = files[0], reason or "defaulted to the first rule"
+    return {"filename": filename, "reason": reason}

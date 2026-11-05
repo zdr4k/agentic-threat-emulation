@@ -1,0 +1,3 @@
+{"run_id": "ca90bf08665c", "rule_file": "powershell_encoded_command.yml", "started_at": "2026-11-05T18:37:18Z", "status": "failed", "assessment": null}
+{"run_id": "e29d29753963", "rule_file": "powershell_encoded_command.yml", "started_at": "2026-11-05T18:38:28Z", "status": "failed", "assessment": null}
+{"run_id": "62121e156fe9", "rule_file": "powershell_encoded_command.yml", "started_at": "2026-11-05T18:42:24Z", "status": "completed", "assessment": "detected"}
